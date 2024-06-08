@@ -15,9 +15,9 @@ Eigen::MatrixXf LQR(PlanarQuadrotor &quadrotor, float dt) {
     Eigen::MatrixXf K = Eigen::MatrixXf::Zero(6, 6);
     Eigen::Vector2f input = quadrotor.GravityCompInput();
 
-    Q.diagonal() << 10, 10, 10, 1, 10, 0.25 / 2 / M_PI;
-    R.row(0) << 0.1, 0.05;
-    R.row(1) << 0.05, 0.1;
+    Q.diagonal() << 0.004, 0.004, 400, 0.005, 0.045, 2 / 2 / M_PI;
+    R.row(0) << 30, 7;
+    R.row(1) << 7, 30;
 
     std::tie(A, B) = quadrotor.Linearize();
     A_discrete = Eye + dt * A;
@@ -40,11 +40,13 @@ int main(int argc, char* args[])
 
     /**
      * TODO: Extend simulation
-     * 1. Set goal state of the mouse when clicking left mouse button (transform the coordinates to the quadrotor world! see visualizer TODO list)
+     * $1. Set goal state of the mouse when clicking left mouse button (transform the coordinates to the quadrotor world! see visualizer TODO list)
      *    [x, y, 0, 0, 0, 0]
-     * 2. Update PlanarQuadrotor from simulation when goal is changed
+     * $2. Update PlanarQuadrotor from simulation when goal is changed
     */
     Eigen::VectorXf initial_state = Eigen::VectorXf::Zero(6);
+    // set starting point to the middle of the screen
+    initial_state << 640, 360, 0, 0, 0, 0;
     PlanarQuadrotor quadrotor(initial_state);
     PlanarQuadrotorVisualizer quadrotor_visualizer(&quadrotor);
     /**
@@ -52,8 +54,9 @@ int main(int argc, char* args[])
      * [x, y, theta, x_dot, y_dot, theta_dot]
      * For implemented LQR controller, it has to be [x, y, 0, 0, 0, 0]
     */
+
     Eigen::VectorXf goal_state = Eigen::VectorXf::Zero(6);
-    goal_state << 0, 0, 0, 0, 0, 0;
+    goal_state << 640, 360, 0, 0, 0, 0;
     quadrotor.SetGoal(goal_state);
     /* Timestep for the simulation */
     const float dt = 0.001;
@@ -62,9 +65,10 @@ int main(int argc, char* args[])
 
     /**
      * TODO: Plot x, y, theta over time
-     * 1. Update x, y, theta history vectors to store trajectory of the quadrotor
-     * 2. Plot trajectory using matplot++ when key 'p' is clicked
+     * $1. Update x, y, theta history vectors to store trajectory of the quadrotor
+     * $2. Plot trajectory using matplot++ when key 'p' is clicked
     */
+   
     std::vector<float> x_history;
     std::vector<float> y_history;
     std::vector<float> theta_history;
@@ -75,18 +79,34 @@ int main(int argc, char* args[])
         bool quit = false;
         float delay;
         int x, y;
-        Eigen::VectorXf state = Eigen::VectorXf::Zero(6);
+        //Eigen::VectorXf state = Eigen::VectorXf::Zero(6);
+        Eigen::VectorXf position = quadrotor.GetState();
 
         while (!quit)
         {
             //events
+            Eigen::VectorXf position = quadrotor.GetState();
+            x_history.push_back(position[0]);
+            y_history.push_back(position[1]);
+
             while (SDL_PollEvent(&e) != 0)
             {
                 if (e.type == SDL_QUIT)
                 {
                     quit = true;
                 }
-                else if (e.type == SDL_MOUSEMOTION)
+                if( e.type == SDL_KEYDOWN ){
+                    matplot::axis({0, SCREEN_WIDTH, SCREEN_HEIGHT, 0});
+                    matplot::plot(x_history, y_history);
+                }
+                if( e.type == SDL_MOUSEBUTTONDOWN )
+                {
+                    SDL_GetMouseState(&x, &y);
+                    goal_state << x, y, 0, 0, 0, 0;
+                    quadrotor.SetGoal(goal_state);
+                    std::cout << "Set goal state to: (" << x << ", " << y << ")" << std::endl;
+                }
+                if (e.type == SDL_MOUSEMOTION)
                 {
                     SDL_GetMouseState(&x, &y);
                     std::cout << "Mouse position: (" << x << ", " << y << ")" << std::endl;
