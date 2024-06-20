@@ -3,7 +3,7 @@
 */
 #include "simulate.h"
 
-Eigen::MatrixXf LQR(PlanarQuadrotor &quadrotor, float dt) {
+Eigen::MatrixXf LQR(PlanarQuadrotor& quadrotor, float dt) {
     /* Calculate LQR gain matrix */
     Eigen::MatrixXf Eye = Eigen::MatrixXf::Identity(6, 6);
     Eigen::MatrixXf A = Eigen::MatrixXf::Zero(6, 6);
@@ -22,19 +22,53 @@ Eigen::MatrixXf LQR(PlanarQuadrotor &quadrotor, float dt) {
     std::tie(A, B) = quadrotor.Linearize();
     A_discrete = Eye + dt * A;
     B_discrete = dt * B;
-    
+
     return LQR(A_discrete, B_discrete, Q, R);
 }
 
-void control(PlanarQuadrotor &quadrotor, const Eigen::MatrixXf &K) {
+void control(PlanarQuadrotor& quadrotor, const Eigen::MatrixXf& K, Mix_Chunk* sound) {
+
     Eigen::Vector2f input = quadrotor.GravityCompInput();
-    quadrotor.SetInput(input - K * quadrotor.GetControlState());
+    Eigen::Vector2f control_input = input - K* quadrotor.GetControlState();
+    quadrotor.SetInput(control_input);
+
+    double volume = std::min(64.0,control_input.norm() * 64.0/10.0);
+    Mix_VolumeChunk(sound, volume);
+    Mix_PlayChannel(-1, sound, 0);
+}
+
+int init(std::shared_ptr<SDL_Window>& gWindow, std::shared_ptr<SDL_Renderer>& gRenderer, Mix_Chunk*& sound, const int SCREEN_WIDTH, const int SCREEN_HEIGHT) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) >= 0) {
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+        gWindow = std::shared_ptr<SDL_Window>(SDL_CreateWindow("Planar Quadrotor", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN), SDL_DestroyWindow);
+        gRenderer = std::shared_ptr<SDL_Renderer>(SDL_CreateRenderer(gWindow.get(), -1, SDL_RENDERER_ACCELERATED), SDL_DestroyRenderer);
+        SDL_SetRenderDrawColor(gRenderer.get(), 0xFF, 0xFF, 0xFF, 0xFF);
+
+        if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
+            std::cout << "SDL_mixer Error: " << Mix_GetError() << std::endl;
+            return -1;
+        }
+
+        sound = Mix_LoadWAV("C:/Users/kryst/OneDrive/Desktop/bubble.wav");
+        if (sound == nullptr) {
+            std::cout << "Failed to load sound: " << Mix_GetError() << std::endl;
+            return -1;
+        }
+    }
+    else {
+        std::cout << "SDL_ERROR: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
 int main(int argc, char* args[])
 {
     std::shared_ptr<SDL_Window> gWindow = nullptr;
     std::shared_ptr<SDL_Renderer> gRenderer = nullptr;
+
+    Mix_Chunk* sound = nullptr;
+
     const int SCREEN_WIDTH = 1280;
     const int SCREEN_HEIGHT = 720;
 
@@ -73,7 +107,7 @@ int main(int argc, char* args[])
     std::vector<float> y_history;
     std::vector<float> theta_history;
 
-    if (init(gWindow, gRenderer, SCREEN_WIDTH, SCREEN_HEIGHT) >= 0)
+    if (init(gWindow, gRenderer, sound, SCREEN_WIDTH, SCREEN_HEIGHT) >= 0)
     {
         SDL_Event e;
         bool quit = false;
@@ -82,8 +116,7 @@ int main(int argc, char* args[])
         //Eigen::VectorXf state = Eigen::VectorXf::Zero(6);
         Eigen::VectorXf position = quadrotor.GetState();
 
-        while (!quit)
-        {
+        while (!quit) {
             //events
             Eigen::VectorXf position = quadrotor.GetState();
             x_history.push_back(position[0]);
@@ -95,11 +128,11 @@ int main(int argc, char* args[])
                 {
                     quit = true;
                 }
-                if( e.type == SDL_KEYDOWN ){
-                    matplot::axis({0, SCREEN_WIDTH, SCREEN_HEIGHT, 0});
+                if (e.type == SDL_KEYDOWN) {
+                    matplot::axis({ 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0 });
                     matplot::plot(x_history, y_history);
                 }
-                if( e.type == SDL_MOUSEBUTTONDOWN )
+                if (e.type == SDL_MOUSEBUTTONDOWN)
                 {
                     SDL_GetMouseState(&x, &y);
                     goal_state << x, y, 0, 0, 0, 0;
@@ -111,41 +144,25 @@ int main(int argc, char* args[])
                     SDL_GetMouseState(&x, &y);
                     std::cout << "Mouse position: (" << x << ", " << y << ")" << std::endl;
                 }
-                
-            }
 
-            SDL_Delay((int) dt * 1000);
+            }
+            
+            SDL_Delay(static_cast<int>(dt * 1000));
 
             SDL_SetRenderDrawColor(gRenderer.get(), 0xFF, 0xFF, 0xFF, 0xFF);
             SDL_RenderClear(gRenderer.get());
 
-            /* Quadrotor rendering step */
             quadrotor_visualizer.render(gRenderer);
 
             SDL_RenderPresent(gRenderer.get());
 
-            /* Simulate quadrotor forward in time */
-            control(quadrotor, K);
+            control(quadrotor, K, sound);
             quadrotor.Update(dt);
         }
     }
+    Mix_FreeChunk(sound);
+    Mix_CloseAudio();
     SDL_Quit();
     return 0;
 }
 
-int init(std::shared_ptr<SDL_Window>& gWindow, std::shared_ptr<SDL_Renderer>& gRenderer, const int SCREEN_WIDTH, const int SCREEN_HEIGHT)
-{
-    if (SDL_Init(SDL_INIT_VIDEO) >= 0)
-    {
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-        gWindow = std::shared_ptr<SDL_Window>(SDL_CreateWindow("Planar Quadrotor", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN), SDL_DestroyWindow);
-        gRenderer = std::shared_ptr<SDL_Renderer>(SDL_CreateRenderer(gWindow.get(), -1, SDL_RENDERER_ACCELERATED), SDL_DestroyRenderer);
-        SDL_SetRenderDrawColor(gRenderer.get(), 0xFF, 0xFF, 0xFF, 0xFF);
-    }
-    else
-    {
-        std::cout << "SDL_ERROR: " << SDL_GetError() << std::endl;
-        return -1;
-    }
-    return 0;
-}

@@ -4,6 +4,7 @@
 
 #include <Eigen/Dense>
 #include <SDL.h>
+#include <SDL_mixer/include/SDL_mixer.h>
 #include <SDL2_gfx/SDL2_gfxPrimitives.h>
 #include <matplot/matplot.h>
 
