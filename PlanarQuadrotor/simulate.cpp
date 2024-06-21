@@ -26,14 +26,39 @@ Eigen::MatrixXf LQR(PlanarQuadrotor& quadrotor, float dt) {
     return LQR(A_discrete, B_discrete, Q, R);
 }
 
-void control(PlanarQuadrotor& quadrotor, const Eigen::MatrixXf& K, Mix_Chunk* sound) {
+float frequencyFactor = 1.0;
+Mix_Chunk* sound = nullptr;
 
+void frequencyEffect(int channel, void* stream, int len, void* udata) {
+
+    float factor = *static_cast<float*>(udata);
+
+    Sint16* samples = static_cast<Sint16*>(stream);
+
+    int sample_count = len / sizeof(Sint16);
+    std::vector<Sint16> new_samples;
+
+    // Przetwarzanie próbek
+    for (int i = 0; i < sample_count; ++i) {
+        int index = static_cast<int>(i * factor);
+        if (index < sample_count) {
+            new_samples.push_back(samples[index]);
+        }
+    }
+
+    // Kopiowanie przetworzonych próbek z powrotem do oryginalnego bufora
+    for (int i = 0; i < std::min(sample_count, static_cast<int>(new_samples.size())); ++i) {
+        samples[i] = new_samples[i];
+    }
+}
+
+
+void control(PlanarQuadrotor& quadrotor, const Eigen::MatrixXf& K, Mix_Chunk* sound) {
     Eigen::Vector2f input = quadrotor.GravityCompInput();
-    Eigen::Vector2f control_input = input - K* quadrotor.GetControlState();
+    Eigen::Vector2f control_input = input - K * quadrotor.GetControlState();
     quadrotor.SetInput(control_input);
 
-    double volume = std::min(64.0,control_input.norm() * 64.0/10.0);
-    Mix_VolumeChunk(sound, volume);
+    frequencyFactor = std::min(2.0, 1.0 + control_input.norm() / 10.0);
     Mix_PlayChannel(-1, sound, 0);
 }
 
@@ -49,7 +74,7 @@ int init(std::shared_ptr<SDL_Window>& gWindow, std::shared_ptr<SDL_Renderer>& gR
             return -1;
         }
 
-        sound = Mix_LoadWAV("C:/Users/kryst/OneDrive/Desktop/bubble.wav");
+        sound = Mix_LoadWAV("C:/Users/kryst/OneDrive/Desktop/STUDIA/quadr.wav");
         if (sound == nullptr) {
             std::cout << "Failed to load sound: " << Mix_GetError() << std::endl;
             return -1;
@@ -62,92 +87,63 @@ int init(std::shared_ptr<SDL_Window>& gWindow, std::shared_ptr<SDL_Renderer>& gR
     return 0;
 }
 
-int main(int argc, char* args[])
-{
+int main(int argc, char* args[]) {
     std::shared_ptr<SDL_Window> gWindow = nullptr;
     std::shared_ptr<SDL_Renderer> gRenderer = nullptr;
-
-    Mix_Chunk* sound = nullptr;
 
     const int SCREEN_WIDTH = 1280;
     const int SCREEN_HEIGHT = 720;
 
-    /**
-     * TODO: Extend simulation
-     * $1. Set goal state of the mouse when clicking left mouse button (transform the coordinates to the quadrotor world! see visualizer TODO list)
-     *    [x, y, 0, 0, 0, 0]
-     * $2. Update PlanarQuadrotor from simulation when goal is changed
-    */
     Eigen::VectorXf initial_state = Eigen::VectorXf::Zero(6);
-    // set starting point to the middle of the screen
     initial_state << 640, 360, 0, 0, 0, 0;
     PlanarQuadrotor quadrotor(initial_state);
     PlanarQuadrotorVisualizer quadrotor_visualizer(&quadrotor);
-    /**
-     * Goal pose for the quadrotor
-     * [x, y, theta, x_dot, y_dot, theta_dot]
-     * For implemented LQR controller, it has to be [x, y, 0, 0, 0, 0]
-    */
 
     Eigen::VectorXf goal_state = Eigen::VectorXf::Zero(6);
     goal_state << 640, 360, 0, 0, 0, 0;
     quadrotor.SetGoal(goal_state);
-    /* Timestep for the simulation */
+
     const float dt = 0.001;
     Eigen::MatrixXf K = LQR(quadrotor, dt);
     Eigen::Vector2f input = Eigen::Vector2f::Zero(2);
 
-    /**
-     * TODO: Plot x, y, theta over time
-     * $1. Update x, y, theta history vectors to store trajectory of the quadrotor
-     * $2. Plot trajectory using matplot++ when key 'p' is clicked
-    */
-   
     std::vector<float> x_history;
     std::vector<float> y_history;
-    std::vector<float> theta_history;
 
-    if (init(gWindow, gRenderer, sound, SCREEN_WIDTH, SCREEN_HEIGHT) >= 0)
-    {
+    if (init(gWindow, gRenderer, sound, SCREEN_WIDTH, SCREEN_HEIGHT) >= 0) {
+        Mix_RegisterEffect(MIX_CHANNEL_POST, frequencyEffect, nullptr, &frequencyFactor);
+
         SDL_Event e;
         bool quit = false;
-        float delay;
         int x, y;
-        //Eigen::VectorXf state = Eigen::VectorXf::Zero(6);
-        Eigen::VectorXf position = quadrotor.GetState();
 
         while (!quit) {
-            //events
             Eigen::VectorXf position = quadrotor.GetState();
             x_history.push_back(position[0]);
             y_history.push_back(position[1]);
 
-            while (SDL_PollEvent(&e) != 0)
-            {
-                if (e.type == SDL_QUIT)
-                {
+            while (SDL_PollEvent(&e) != 0) {
+                if (e.type == SDL_QUIT) {
                     quit = true;
                 }
                 if (e.type == SDL_KEYDOWN) {
+                    
                     matplot::axis({ 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0 });
                     matplot::plot(x_history, y_history);
                 }
-                if (e.type == SDL_MOUSEBUTTONDOWN)
-                {
+                if (e.type == SDL_MOUSEBUTTONDOWN) {
                     SDL_GetMouseState(&x, &y);
                     goal_state << x, y, 0, 0, 0, 0;
                     quadrotor.SetGoal(goal_state);
                     std::cout << "Set goal state to: (" << x << ", " << y << ")" << std::endl;
                 }
-                if (e.type == SDL_MOUSEMOTION)
-                {
+                if (e.type == SDL_MOUSEMOTION) {
                     SDL_GetMouseState(&x, &y);
                     std::cout << "Mouse position: (" << x << ", " << y << ")" << std::endl;
                 }
-
             }
-            
-            SDL_Delay(static_cast<int>(dt * 1000));
+
+            SDL_Delay(dt * 1000);
 
             SDL_SetRenderDrawColor(gRenderer.get(), 0xFF, 0xFF, 0xFF, 0xFF);
             SDL_RenderClear(gRenderer.get());
@@ -159,10 +155,12 @@ int main(int argc, char* args[])
             control(quadrotor, K, sound);
             quadrotor.Update(dt);
         }
+
+        Mix_UnregisterEffect(MIX_CHANNEL_POST, frequencyEffect);
     }
+
     Mix_FreeChunk(sound);
     Mix_CloseAudio();
     SDL_Quit();
     return 0;
 }
-
